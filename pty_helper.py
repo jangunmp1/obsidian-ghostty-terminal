@@ -22,34 +22,6 @@ _CHUNK = 4096
 _CMDIO = 3  # resize pipe fd
 
 
-def _send_sigwinch_to_pty_users(child_pid: int) -> None:
-    """Send SIGWINCH to every process whose stdin is the PTY slave.
-
-    TIOCSWINSZ sends SIGWINCH only to the session that owns the PTY slave as
-    its controlling terminal.  When the shell is started via flatpak-spawn
-    --host, the Flatpak portal spawns the shell in a separate session so that
-    signal never arrives.  However, the shell still inherits the PTY slave fd
-    as stdin (fd 0).  We exploit that: read the slave path from the child's
-    /proc entry, then scan all /proc entries for processes with the same
-    stdin and deliver SIGWINCH directly.
-    """
-    try:
-        slave_path = os.readlink(f"/proc/{child_pid}/fd/0")
-    except OSError:
-        return
-    try:
-        for entry in os.listdir("/proc"):
-            if not entry.isdigit():
-                continue
-            try:
-                if os.readlink(f"/proc/{entry}/fd/0") == slave_path:
-                    os.kill(int(entry), signal.SIGWINCH)
-            except OSError:
-                pass
-    except OSError:
-        pass
-
-
 def _write_all(fd: int, data: bytes) -> None:
     while data:
         data = data[os.write(fd, data):]
@@ -80,28 +52,11 @@ def _main_unix() -> None:
     # This ensures ~/.zprofile, ~/.bash_profile, etc. are sourced.
     args[0] = "-" + os.path.basename(shell)
 
-    # Open PTY manually instead of using pty.fork(), so we can skip TIOCSCTTY
-    # in the child process.  pty.fork() calls TIOCSCTTY, which causes flatpak-
-    # spawn (the immediate child) to claim the PTY slave as its controlling
-    # terminal.  That blocks the real shell (e.g. zsh started via
-    # flatpak-spawn --host) from claiming it, so it never receives SIGWINCH.
-    # By leaving the PTY slave unclaimed here, the shell on the host can call
-    # TIOCSCTTY itself and become the proper owner of the controlling terminal.
-    import termios
-    pty_fd, slave_fd = os.openpty()
-    child_pid = os.fork()
+    # Fork a PTY
+    child_pid, pty_fd = pty.fork()
 
     if child_pid == 0:
-        # ─── Child ───────────────────────────────────────────────────────────
-        os.close(pty_fd)
-        os.setsid()
-        # Redirect stdin/stdout/stderr to the PTY slave, but intentionally do
-        # NOT call TIOCSCTTY – leave the PTY slave unclaimed so the shell
-        # launched below can claim it as its own controlling terminal.
-        for _fd in (sys.stdin.fileno(), sys.stdout.fileno(), sys.stderr.fileno()):
-            os.dup2(slave_fd, _fd)
-        if slave_fd > 2:
-            os.close(slave_fd)
+        # ─── Child: close inherited pipe fds before exec ──────────────────────
         for _fd in (_CMDIO,):
             try:
                 os.close(_fd)
@@ -109,8 +64,6 @@ def _main_unix() -> None:
                 pass
         os.execvp(shell, args)
         sys.exit(1)  # unreachable unless execvp fails
-
-    os.close(slave_fd)
 
     # ─── Parent: proxy I/O ───────────────────────────────────────────────────
 
@@ -236,13 +189,6 @@ def _main_unix() -> None:
                             ioctl(pty_fd, TIOCSWINSZ, winsize)
                         except OSError:
                             pass
-                        # TIOCSWINSZ sends SIGWINCH to the session that owns the
-                        # PTY slave as its controlling terminal.  When the shell is
-                        # launched via flatpak-spawn --host, the actual shell
-                        # process lives in a different session and never receives
-                        # that signal.  Explicitly walk child_pid's process tree
-                        # and deliver SIGWINCH so the shell updates COLUMNS.
-                        _send_sigwinch_to_pty_users(child_pid)
     finally:
         _stop_event.set()
         sel.close()
