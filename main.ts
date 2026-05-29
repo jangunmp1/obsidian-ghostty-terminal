@@ -249,6 +249,14 @@ class GhosttyTerminalView extends ItemView {
 
         this.terminal.open(this.termEl!);
 
+        // The terminal library sets contenteditable="true" on termEl for IME support.
+        // During Korean/CJK composition, Chromium scrolls the contenteditable element
+        // to reveal the cursor, shifting the canvas upward by ~10px. Reset immediately.
+        this.termEl!.addEventListener('scroll', () => {
+            this.termEl!.scrollTop = 0;
+            this.termEl!.scrollLeft = 0;
+        }, { capture: true });
+
         // Sync container background with theme to avoid a dark fringe around the terminal
         const container = this.containerEl.children[1] as HTMLElement;
         if (container) container.style.background = theme.background;
