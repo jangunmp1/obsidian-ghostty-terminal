@@ -249,6 +249,10 @@ class GhosttyTerminalView extends ItemView {
 
         this.terminal.open(this.termEl!);
 
+        // Sync container background with theme to avoid a dark fringe around the terminal
+        const container = this.containerEl.children[1] as HTMLElement;
+        if (container) container.style.background = theme.background;
+
         // Build the full keybind list: Ghostty defaults + user config.
         // User config entries override defaults for the same key combo.
         const effectiveKeybinds = buildEffectiveKeybinds(this.plugin.ghosttyConfig.keybinds);
@@ -264,7 +268,7 @@ class GhosttyTerminalView extends ItemView {
             if (action === 'copy_to_clipboard') {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                const text = window.getSelection()?.toString() ?? '';
+                const text = (this.terminal as any)?.getSelection?.() ?? '';
                 if (text) navigator.clipboard.writeText(text).catch(() => {/* ignore */});
 
             } else if (action === 'paste_from_clipboard') {
@@ -532,8 +536,10 @@ class GhosttyTerminalView extends ItemView {
 
 // Ghostty's built-in defaults that we always enforce.
 const GHOSTTY_BUILTIN_KEYBINDS: GhosttyKeybind[] = [
-    { mods: new Set(['super']), key: 'c',     action: 'copy_to_clipboard' },
-    { mods: new Set(['super']), key: 'v',     action: 'paste_from_clipboard' },
+    { mods: new Set(['super']),          key: 'c',     action: 'copy_to_clipboard' },
+    { mods: new Set(['super']),          key: 'v',     action: 'paste_from_clipboard' },
+    { mods: new Set(['ctrl', 'shift']),  key: 'c',     action: 'copy_to_clipboard' },
+    { mods: new Set(['ctrl', 'shift']),  key: 'v',     action: 'paste_from_clipboard' },
     // shift+enter / cmd+enter → kitty keyboard protocol newlines (used by Claude etc.)
     { mods: new Set(['shift']), key: 'enter', action: 'text:\x1b[13;2u' },
     { mods: new Set(['super']), key: 'enter', action: 'text:\x1b[13;9u' },
