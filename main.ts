@@ -153,6 +153,7 @@ class GhosttyTerminalView extends ItemView {
     private ptyProcess: child_process.ChildProcess | null = null;
     private resizePipe: import('stream').Writable | null = null;
     private resizeObserver: ResizeObserver | null = null;
+    private resizeFollowUpId: number | null = null;
     private charWidth = 9;
     private charHeight = 18;
     private termEl: HTMLElement | null = null;
@@ -367,7 +368,11 @@ class GhosttyTerminalView extends ItemView {
             return;
         }
 
-        const { cols, rows } = this.terminalDimensions();
+        // Use the WASM terminal's actual cols/rows as the source of truth.
+        // terminalDimensions() recalculates independently and can disagree with
+        // the terminal after fitAddon.fit(), causing an initial size mismatch.
+        const cols = this.terminal?.cols ?? this.terminalDimensions().cols;
+        const rows = this.terminal?.rows ?? this.terminalDimensions().rows;
         const python = process.platform === 'darwin' ? 'python3' : 'python3';
 
         try {
@@ -393,6 +398,11 @@ class GhosttyTerminalView extends ItemView {
             this.resizePipe = stdioArr[3];
 
             this.ptyAlive = true;
+
+            // Immediately set the PTY window size via TIOCSWINSZ so zsh reads the
+            // correct size from the start. Without this the PTY is 0×0 and zsh
+            // falls back to the COLUMNS env var, which may still differ visually.
+            this.sendResizeToPty();
             this.restartBtn?.addClass('ghostty-hidden');
 
             // PTY output → terminal display
@@ -487,16 +497,28 @@ class GhosttyTerminalView extends ItemView {
     private handleResize() {
         if (!this.terminal || !this.fitAddon) return;
 
-        // Let the addon do the layout fitting
+        // ResizeObserver fires post-layout, so clientWidth/clientHeight are already
+        // correct here. Call fit() immediately so SIGWINCH reaches the shell before
+        // the user types the next command (avoids the 16ms RAF delay that caused
+        // zsh to redraw with stale COLUMNS on immediate Ctrl+C after resize).
         this.fitAddon.fit();
+        this.sendResizeToPty();
 
-        // PTY dimensions are kept in sync natively by terminal resize, but we need
-        // to re-calculate columns/rows to pass to the PTY explicitly via our pipe
-        const { cols, rows } = this.terminal;
+        // FitAddon has a 50ms internal _isResizing guard that blocks re-entrant
+        // calls during rapid drag. Follow-up fires 60ms after the last resize event
+        // (once the guard has expired) to apply the final dimensions if skipped.
+        if (this.resizeFollowUpId !== null) clearTimeout(this.resizeFollowUpId);
+        this.resizeFollowUpId = window.setTimeout(() => {
+            this.resizeFollowUpId = null;
+            if (!this.terminal || !this.fitAddon) return;
+            this.fitAddon.fit();
+            this.sendResizeToPty();
+        }, 60);
+    }
 
+    private sendResizeToPty() {
+        const { cols, rows } = this.terminal!;
         if (this.ptyAlive && this.resizePipe) {
-            // Send 4-byte big-endian resize frame (rows uint16, cols uint16)
-            // Python's pty_helper.py reads this on fd 3 and calls TIOCSWINSZ
             const frame = Buffer.alloc(4);
             frame.writeUInt16BE(rows, 0);
             frame.writeUInt16BE(cols, 2);
@@ -535,6 +557,7 @@ class GhosttyTerminalView extends ItemView {
 
     onClose(): Promise<void> {
         this.resizeObserver?.disconnect();
+        if (this.resizeFollowUpId !== null) clearTimeout(this.resizeFollowUpId);
         this.killPty();
         this.terminal?.dispose?.();
         this.fitAddon?.dispose?.();
