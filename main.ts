@@ -197,7 +197,11 @@ class GhosttyTerminalView extends ItemView {
         this.measureCharDimensions();
 
         this.initTerminal();
-        this.spawnPty();
+
+        // Defer spawnPty so that Obsidian's setState() runs first.
+        // setViewState() calls onOpen() then setState(), so a macrotask
+        // here ensures cwdOverride is set before the PTY starts.
+        window.setTimeout(() => { if (this.terminal) this.spawnPty(); }, 0);
 
         this.resizeObserver = new ResizeObserver(() => this.handleResize());
         this.resizeObserver.observe(this.termEl);
