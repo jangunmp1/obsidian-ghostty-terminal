@@ -21,6 +21,15 @@ import ptyHelperCode from './pty_helper.py';
 
 const VIEW_TYPE_GHOSTTY = 'ghostty-terminal';
 
+/** Returns the first path in the list that exists on the filesystem. Falls back to the last entry. */
+function resolveFirstExisting(candidates: string[]): string {
+    const filtered = candidates.filter(p => p.length > 0);
+    for (const p of filtered) {
+        try { if (fs.existsSync(p)) return p; } catch { /* skip */ }
+    }
+    return filtered[filtered.length - 1] ?? '/bin/sh';
+}
+
 // ─── Plugin ──────────────────────────────────────────────────────────────────
 
 export default class GhosttyTerminalPlugin extends Plugin {
@@ -33,7 +42,9 @@ export default class GhosttyTerminalPlugin extends Plugin {
         await this.loadSettings();
 
         // 2. Parse Ghostty config once at boot
-        this.ghosttyConfig = parseGhosttyConfig(this.settings.ghosttyConfigPath || undefined);
+        this.ghosttyConfig = parseGhosttyConfig(
+            this.settings.ghosttyConfigPaths.length > 0 ? this.settings.ghosttyConfigPaths : undefined
+        );
 
         // 3. Boot Ghostty WASM
         try {
@@ -92,8 +103,22 @@ export default class GhosttyTerminalPlugin extends Plugin {
     }
 
     async loadSettings() {
-        const data = await this.loadData() as Partial<GhosttyTerminalSettings> | null;
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+        const raw = await this.loadData() as Record<string, unknown> | null;
+        const data = raw ?? {};
+
+        // Migrate legacy single-string fields to arrays
+        const legacyShell = data['defaultShell'] as string | undefined;
+        const legacyConfig = data['ghosttyConfigPath'] as string | undefined;
+        if (!data['shellPaths'] && legacyShell) {
+            data['shellPaths'] = [legacyShell];
+            delete data['defaultShell'];
+        }
+        if (!data['ghosttyConfigPaths'] && legacyConfig) {
+            data['ghosttyConfigPaths'] = [legacyConfig];
+            delete data['ghosttyConfigPath'];
+        }
+
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, data) as GhosttyTerminalSettings;
     }
 
     async saveSettings() {
@@ -154,6 +179,7 @@ class GhosttyTerminalView extends ItemView {
     private resizePipe: import('stream').Writable | null = null;
     private resizeObserver: ResizeObserver | null = null;
     private resizeFollowUpId: number | null = null;
+    private isComposing = false;
     private charWidth = 9;
     private charHeight = 18;
     private termEl: HTMLElement | null = null;
@@ -193,6 +219,7 @@ class GhosttyTerminalView extends ItemView {
         this.restartBtn.onclick = () => this.spawnPty();
 
         this.termEl = wrapper.createDiv({ cls: 'ghostty-term' });
+
 
         // Measure char dimensions first so we pass correct cols/rows to PTY
         this.measureCharDimensions();
@@ -254,14 +281,6 @@ class GhosttyTerminalView extends ItemView {
 
         this.terminal.open(this.termEl!);
 
-        // The terminal library sets contenteditable="true" on termEl for IME support.
-        // During Korean/CJK composition, Chromium scrolls the contenteditable element
-        // to reveal the cursor, shifting the canvas upward by ~10px. Reset immediately.
-        this.termEl!.addEventListener('scroll', () => {
-            this.termEl!.scrollTop = 0;
-            this.termEl!.scrollLeft = 0;
-        }, { capture: true });
-
         // Sync container background with theme to avoid a dark fringe around the terminal
         const container = this.containerEl.children[1] as HTMLElement;
         if (container) container.style.background = theme.background;
@@ -269,6 +288,17 @@ class GhosttyTerminalView extends ItemView {
         // Build the full keybind list: Ghostty defaults + user config.
         // User config entries override defaults for the same key combo.
         const effectiveKeybinds = buildEffectiveKeybinds(this.plugin.ghosttyConfig.keybinds);
+
+        this.termEl!.addEventListener('compositionstart', () => {
+            this.isComposing = true;
+        }, true);
+        this.termEl!.addEventListener('compositionend', () => {
+            this.isComposing = false;
+            if (this.fitAddon) {
+                this.fitAddon.fit();
+                this.sendResizeToPty();
+            }
+        }, true);
 
         // Intercept keybinds in capture phase so Obsidian's global handlers
         // never see the key events meant for the terminal.
@@ -327,11 +357,14 @@ class GhosttyTerminalView extends ItemView {
         const gc = this.plugin.ghosttyConfig;
         const s = this.plugin.settings;
 
-        const shell =
-            s.defaultShell ||
-            gc.shell ||
-            process.env.SHELL ||
-            (process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh');
+        const shell = resolveFirstExisting(
+            [
+                ...s.shellPaths,
+                ...(gc.shell ? [gc.shell] : []),
+                process.env.SHELL ?? '',
+                process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh',
+            ]
+        );
 
         // Resolve cwd
         const adapter = this.app.vault.adapter as unknown as { getBasePath?: () => string, getFullPath?: (p: string) => string };
@@ -496,6 +529,7 @@ class GhosttyTerminalView extends ItemView {
 
     private handleResize() {
         if (!this.terminal || !this.fitAddon) return;
+        if (this.isComposing) return;
 
         // ResizeObserver fires post-layout, so clientWidth/clientHeight are already
         // correct here. Call fit() immediately so SIGWINCH reaches the shell before
@@ -578,6 +612,10 @@ const GHOSTTY_BUILTIN_KEYBINDS: GhosttyKeybind[] = [
     // shift+enter / cmd+enter → kitty keyboard protocol newlines (used by Claude etc.)
     { mods: new Set(['shift']), key: 'enter', action: 'text:\x1b[13;2u' },
     { mods: new Set(['super']), key: 'enter', action: 'text:\x1b[13;9u' },
+    // Home/End: send SS3 sequences matching xterm-256color terminfo (khome=\EOH, kend=\EOF)
+    // so that oh-my-zsh / zsh ZLE recognizes them via ${terminfo[khome]}/${terminfo[kend]}
+    { mods: new Set([]), key: 'home', action: 'text:\x1bOH' },
+    { mods: new Set([]), key: 'end',  action: 'text:\x1bOF' },
 ];
 
 /**

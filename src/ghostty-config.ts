@@ -51,8 +51,8 @@ export interface GhosttyConfig {
 }
 
 /** Returns candidate config file paths in priority order */
-function getCandidatePaths(overridePath?: string): string[] {
-    if (overridePath) return [overridePath];
+function getCandidatePaths(overridePaths?: string[]): string[] {
+    if (overridePaths && overridePaths.length > 0) return overridePaths;
 
     const candidates: string[] = [];
 
@@ -91,10 +91,10 @@ function normalizeColor(val: string): string {
  * Parse a Ghostty config file.
  * Ghostty config is line-delimited key = value (comments with #).
  */
-export function parseGhosttyConfig(overridePath?: string): GhosttyConfig {
+export function parseGhosttyConfig(overridePaths?: string[]): GhosttyConfig {
     const config: GhosttyConfig = { colors: {}, keybinds: [] };
 
-    const candidates = getCandidatePaths(overridePath);
+    const candidates = getCandidatePaths(overridePaths);
     let rawContent: string | null = null;
 
     for (const candidate of candidates) {
