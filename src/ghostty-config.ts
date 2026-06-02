@@ -94,7 +94,7 @@ function normalizeColor(val: string): string {
 export function parseGhosttyConfig(overridePaths?: string[]): GhosttyConfig {
     const config: GhosttyConfig = { colors: {}, keybinds: [] };
 
-    const candidates = getCandidatePaths(overridePaths);
+    const candidates = getCandidatePaths(overridePaths).filter(p => p.trim().length > 0);
     let rawContent: string | null = null;
 
     for (const candidate of candidates) {
@@ -161,6 +161,9 @@ function loadThemeColors(themeName: string): GhosttyThemeColors | null {
         path.join(os.homedir(), '.config', 'ghostty', 'themes', themeName),
         '/usr/share/ghostty/themes/' + themeName,
         '/run/host/usr/share/ghostty/themes/' + themeName,
+        // macOS: Ghostty app bundle (system-wide and user Applications)
+        `/Applications/Ghostty.app/Contents/Resources/ghostty/themes/${themeName}`,
+        path.join(os.homedir(), 'Applications', 'Ghostty.app', 'Contents', 'Resources', 'ghostty', 'themes', themeName),
     ];
 
     for (const themePath of candidates) {
