@@ -274,6 +274,7 @@ class GhosttyTerminalView extends ItemView {
             scrollback,
             cursorStyle: gc.cursorStyle ?? 'block',
             cursorBlink: gc.cursorBlink ?? false,
+            ...( { ligatures: s.ligatures } as object ),
         });
 
         this.fitAddon = new FitAddon();
