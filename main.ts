@@ -8,7 +8,8 @@ import {
     WorkspaceLeaf,
     ViewStateResult,
 } from 'obsidian';
-import { init as initGhosttyWasm, Terminal, FitAddon } from 'ghostty-web';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -35,7 +36,6 @@ function resolveFirstExisting(candidates: string[]): string {
 export default class GhosttyTerminalPlugin extends Plugin {
     settings: GhosttyTerminalSettings;
     ghosttyConfig: GhosttyConfig;
-    private wasmReady = false;
 
     async onload() {
         // 1. Load settings
@@ -46,22 +46,13 @@ export default class GhosttyTerminalPlugin extends Plugin {
             this.settings.ghosttyConfigPaths.length > 0 ? this.settings.ghosttyConfigPaths : undefined
         );
 
-        // 3. Boot Ghostty WASM
-        try {
-            await initGhosttyWasm();
-            this.wasmReady = true;
-        } catch (e) {
-            console.error('[GhosttyTerminal] Failed to init WASM:', e);
-            new Notice('Wasm failed to load. Check console.', 8000);
-        }
-
-        // 4. Register view
+        // 3. Register view
         this.registerView(VIEW_TYPE_GHOSTTY, (leaf) => new GhosttyTerminalView(leaf, this));
 
-        // 5. Ribbon icon
+        // 4. Ribbon icon
         this.addRibbonIcon('terminal', 'Open terminal', () => this.activateView());
 
-        // 6. Commands
+        // 5. Commands
         this.addCommand({
             id: 'open',
             name: 'Open terminal',
@@ -74,7 +65,7 @@ export default class GhosttyTerminalPlugin extends Plugin {
             callback: () => this.activateView(true, 'split'),
         });
 
-        // 7. Context menu on file explorer
+        // 6. Context menu on file explorer
         this.registerEvent(
             this.app.workspace.on('file-menu', (menu: Menu, file: TAbstractFile) => {
                 const targetPath = file instanceof TFile
@@ -90,7 +81,7 @@ export default class GhosttyTerminalPlugin extends Plugin {
             })
         );
 
-        // 8. Settings tab
+        // 7. Settings tab
         this.addSettingTab(new GhosttySettingTab(this.app, this));
     }
 
@@ -184,6 +175,9 @@ class GhosttyTerminalView extends ItemView {
     private charHeight = 18;
     private termEl: HTMLElement | null = null;
     private ptyAlive = false;
+    // Dedup guard: Chromium's IME fires xterm onData twice for the same Hangul
+    // chunk (composition + input event) — drop the duplicate within 30 ms.
+    private lastKoreanSent = { data: '', time: 0 };
     private restartBtn: HTMLElement | null = null;
     private cwdOverride: string | null = null;
 
@@ -249,6 +243,8 @@ class GhosttyTerminalView extends ItemView {
             background: gc.colors.background ?? '#1e1e2e',
             foreground: gc.colors.foreground ?? '#cdd6f4',
             cursor: gc.colors.cursor ?? '#f5e0dc',
+            selectionBackground: gc.colors.selectionBackground ?? '#4e9cd6',
+            selectionForeground: gc.colors.selectionForeground ?? '#ffffff',
             black: gc.colors.black ?? '#45475a',
             red: gc.colors.red ?? '#f38ba8',
             green: gc.colors.green ?? '#a6e3a1',
@@ -295,11 +291,15 @@ class GhosttyTerminalView extends ItemView {
         }, true);
         this.termEl!.addEventListener('compositionend', () => {
             this.isComposing = false;
-            if (this.fitAddon) {
-                this.fitAddon.fit();
-                this.sendResizeToPty();
-            }
-        }, true);
+            // Defer the fit until after the IME has fully committed, so the
+            // resize does not race the composition's final input event.
+            window.setTimeout(() => {
+                if (this.fitAddon) {
+                    this.fitAddon.fit();
+                    this.sendResizeToPty();
+                }
+            }, 0);
+        });
 
         // Intercept keybinds in capture phase so Obsidian's global handlers
         // never see the key events meant for the terminal.
@@ -312,7 +312,7 @@ class GhosttyTerminalView extends ItemView {
             if (action === 'copy_to_clipboard') {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                const text = (this.terminal as any)?.getSelection?.() ?? '';
+                const text = this.terminal?.getSelection?.() ?? '';
                 if (text) navigator.clipboard.writeText(text).catch(() => {/* ignore */});
 
             } else if (action === 'paste_from_clipboard') {
@@ -335,7 +335,7 @@ class GhosttyTerminalView extends ItemView {
 
             } else {
                 // Action we can't implement (new_tab, new_window, etc.) —
-                // block Obsidian from stealing the key but let ghostty-web handle it.
+                // block Obsidian from stealing the key but let xterm.js handle it.
                 e.stopPropagation();
             }
         }, { capture: true });
@@ -402,12 +402,12 @@ class GhosttyTerminalView extends ItemView {
             return;
         }
 
-        // Use the WASM terminal's actual cols/rows as the source of truth.
+        // Use the terminal's actual cols/rows as the source of truth.
         // terminalDimensions() recalculates independently and can disagree with
         // the terminal after fitAddon.fit(), causing an initial size mismatch.
         const cols = this.terminal?.cols ?? this.terminalDimensions().cols;
         const rows = this.terminal?.rows ?? this.terminalDimensions().rows;
-        const python = process.platform === 'darwin' ? 'python3' : 'python3';
+        const python = 'python3';
 
         try {
             this.ptyProcess = child_process.spawn(
@@ -454,6 +454,15 @@ class GhosttyTerminalView extends ItemView {
             // Terminal input → PTY stdin
             this.terminal?.onData((data: string) => {
                 if (this.ptyAlive && this.ptyProcess?.stdin) {
+                    // Korean/CJK IME duplicate suppression: the same Hangul chunk
+                    // can arrive twice back-to-back (composition + input event).
+                    if (/[가-힣ᄀ-ᇿ㄰-㆏]/.test(data)) {
+                        const now = Date.now();
+                        if (data === this.lastKoreanSent.data && now - this.lastKoreanSent.time < 30) {
+                            return;
+                        }
+                        this.lastKoreanSent = { data, time: now };
+                    }
                     // onData gives a JS string; write as UTF-8 bytes to the PTY
                     this.ptyProcess.stdin.write(data, 'utf8');
                 }
