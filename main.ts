@@ -3,6 +3,7 @@ import {
     Menu,
     Notice,
     Plugin,
+    Scope,
     TAbstractFile,
     TFile,
     WorkspaceLeaf,
@@ -180,6 +181,10 @@ class GhosttyTerminalView extends ItemView {
     private lastKoreanSent = { data: '', time: 0 };
     private restartBtn: HTMLElement | null = null;
     private cwdOverride: string | null = null;
+    // Pushed while the terminal has focus: a parentless Scope disables every
+    // Obsidian hotkey (Ctrl+B, Ctrl+O, …) so keys reach the shell, exactly
+    // like Obsidian's own modals do. Popped on blur.
+    private keymapScope: Scope | null = null;
 
     constructor(leaf: WorkspaceLeaf, private plugin: GhosttyTerminalPlugin) {
         super(leaf);
@@ -285,6 +290,23 @@ class GhosttyTerminalView extends ItemView {
         // Build the full keybind list: Ghostty defaults + user config.
         // User config entries override defaults for the same key combo.
         const effectiveKeybinds = buildEffectiveKeybinds(this.plugin.ghosttyConfig.keybinds);
+
+        // Obsidian's hotkey handler listens at the window level in the capture
+        // phase, so element-level interception cannot beat it. Instead, while
+        // the terminal owns focus we push an empty keymap scope — the official
+        // mechanism modals use to suspend global hotkeys.
+        this.termEl!.addEventListener('focusin', () => {
+            if (!this.keymapScope) {
+                this.keymapScope = new Scope();
+                this.app.keymap.pushScope(this.keymapScope);
+            }
+        });
+        this.termEl!.addEventListener('focusout', () => {
+            if (this.keymapScope) {
+                this.app.keymap.popScope(this.keymapScope);
+                this.keymapScope = null;
+            }
+        });
 
         this.termEl!.addEventListener('compositionstart', () => {
             this.isComposing = true;
@@ -600,6 +622,10 @@ class GhosttyTerminalView extends ItemView {
     }
 
     onClose(): Promise<void> {
+        if (this.keymapScope) {
+            this.app.keymap.popScope(this.keymapScope);
+            this.keymapScope = null;
+        }
         this.resizeObserver?.disconnect();
         if (this.resizeFollowUpId !== null) clearTimeout(this.resizeFollowUpId);
         this.killPty();
