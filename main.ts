@@ -10,6 +10,7 @@ import {
     ViewStateResult,
 } from 'obsidian';
 import { Terminal } from '@xterm/xterm';
+import type { IUnicodeVersionProvider } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import * as os from 'os';
@@ -166,6 +167,40 @@ export default class GhosttyTerminalPlugin extends Plugin {
 
 const CHAR_MEASURE_ID = 'ghostty-char-measure';
 
+function getCustomWcwidth(num: number): 0 | 1 | 2 {
+    // Unicode Emoji ranges:
+    // Miscellaneous Symbols and Pictographs, Emoticons, Transport and Map Symbols,
+    // Supplemental Symbols and Pictographs, Symbols and Pictographs Extended-A (e.g. 🟢 U+1F7E2)
+    if (num >= 0x1f300 && num <= 0x1fbff) {
+        return 2;
+    }
+    if (num >= 0x2600 && num <= 0x27bf) {
+        return 2;
+    }
+    // East Asian Wide / Fullwidth characters and CJK ranges
+    if (
+        (num >= 0x1100 && num <= 0x11ff) || // Hangul Jamo
+        (num >= 0x2e80 && num <= 0x9fff) || // CJK Radicals, Symbols, Han
+        (num >= 0xac00 && num <= 0xd7af) || // Hangul Syllables
+        (num >= 0xf900 && num <= 0xfaff) || // CJK Compatibility Ideographs
+        (num >= 0xfe10 && num <= 0xfe1f) || // Vertical Forms
+        (num >= 0xff00 && num <= 0xffef)    // Halfwidth and Fullwidth Forms
+    ) {
+        return 2;
+    }
+    return 1;
+}
+
+const customEmojiUnicodeProvider: IUnicodeVersionProvider = {
+    version: 'custom-emoji',
+    wcwidth(num: number): 0 | 1 | 2 {
+        return getCustomWcwidth(num);
+    },
+    charProperties(codepoint: number, _preceding: number): number {
+        return getCustomWcwidth(codepoint);
+    }
+};
+
 class GhosttyTerminalView extends ItemView {
     private terminal: Terminal | null = null;
     private fitAddon: FitAddon | null = null;
@@ -278,6 +313,13 @@ class GhosttyTerminalView extends ItemView {
             customGlyphs: true,
             ...( { ligatures: s.ligatures } as object ),
         });
+
+        try {
+            this.terminal.unicode.register(customEmojiUnicodeProvider);
+            this.terminal.unicode.activeVersion = 'custom-emoji';
+        } catch (e) {
+            console.warn('[GhosttyTerminal] Failed to register custom unicode provider:', e);
+        }
 
         this.fitAddon = new FitAddon();
         this.terminal.loadAddon(this.fitAddon);
