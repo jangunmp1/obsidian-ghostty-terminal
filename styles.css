@@ -185,8 +185,10 @@
 }
 
 .xterm .xterm-viewport {
-    /* On OS X this is required in order for the scroll bar to appear fully opaque */
-    background-color: #000;
+    /* Transparent (not the stock #000) so the partial-row gap at the bottom of
+       the terminal shows the theme background set on .ghostty-container instead
+       of a black band. Stays correct in both light and dark themes. */
+    background-color: transparent;
     overflow-y: scroll;
     cursor: default;
     position: absolute;
