@@ -1,3 +1,4 @@
+/* global activeDocument */
 import {
     ItemView,
     Menu,
@@ -10,6 +11,7 @@ import {
 } from 'obsidian';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -269,6 +271,9 @@ class GhosttyTerminalView extends ItemView {
             scrollback,
             cursorStyle: gc.cursorStyle ?? 'block',
             cursorBlink: gc.cursorBlink ?? false,
+            lineHeight: 1,
+            letterSpacing: 0,
+            customGlyphs: true,
             ...( { ligatures: s.ligatures } as object ),
         });
 
@@ -276,6 +281,16 @@ class GhosttyTerminalView extends ItemView {
         this.terminal.loadAddon(this.fitAddon);
 
         this.terminal.open(this.termEl!);
+
+        try {
+            const webglAddon = new WebglAddon();
+            webglAddon.onContextLoss(() => {
+                webglAddon.dispose();
+            });
+            this.terminal.loadAddon(webglAddon);
+        } catch (e) {
+            console.warn('[GhosttyTerminal] WebGL addon initialization failed, fallback to Canvas renderer:', e);
+        }
 
         // Sync container background with theme to avoid a dark fringe around the terminal
         const container = this.containerEl.children[1] as HTMLElement;
@@ -309,7 +324,7 @@ class GhosttyTerminalView extends ItemView {
             if (action === 'copy_to_clipboard') {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                const text = (this.terminal as any)?.getSelection?.() ?? '';
+                const text = this.terminal?.getSelection() ?? '';
                 if (text) navigator.clipboard.writeText(text).catch(() => {/* ignore */});
 
             } else if (action === 'paste_from_clipboard') {
@@ -515,10 +530,9 @@ class GhosttyTerminalView extends ItemView {
         const measured = ctx.measureText('W');
 
         this.charWidth = Math.ceil(measured.width);
-        // actualBoundingBoxAscent + Descent gives accurate line height if available
         const ascent = measured.actualBoundingBoxAscent ?? fontSize * 0.8;
         const descent = measured.actualBoundingBoxDescent ?? fontSize * 0.2;
-        this.charHeight = Math.ceil((ascent + descent) * 1.2); // ≈ line-height
+        this.charHeight = Math.ceil(ascent + descent);
     }
 
     private terminalDimensions(): { cols: number; rows: number } {
@@ -693,6 +707,7 @@ function unescapeGhosttyText(s: string): string {
  * the onset of the next syllable (e.g. "간" + next "나" → committed "가").
  * Uses es-hangul disassemble/assemble to detect and apply the adjustment.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function hangulAdjustCodaMove(pending: string, nextData: string): string {
     if (!pending || !nextData) return pending;
     const lastChar = pending[pending.length - 1];

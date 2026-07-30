@@ -196,7 +196,7 @@ export class GhosttySettingTab extends PluginSettingTab {
             new Setting(listEl)
                 .addButton(btn =>
                     btn
-                        .setButtonText('+ Add path')
+                        .setButtonText('Add path')
                         .onClick(async () => {
                             await setPaths([...getPaths(), '']);
                             render();
