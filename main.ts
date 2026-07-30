@@ -30,13 +30,38 @@ const VIEW_TYPE_GHOSTTY = 'ghostty-terminal';
 
 const CHAR_MEASURE_ID = 'ghostty-char-measure';
 
+/**
+ * Codepoints in the Miscellaneous Symbols + Dingbats block (U+2600–U+27BF) that
+ * have Emoji_Presentation=Yes, i.e. the only ones that are 2 cells wide per
+ * Unicode / `string-width`. The rest of the block (e.g. the ✳✶✻✽ star dingbats
+ * used by CLI "thinking" spinners) are 1 cell. Blanket-widening the whole block
+ * desynced xterm's wrapping from apps that measure with string-width, corrupting
+ * full-screen TUIs (duplicated lines / misplaced cursor while a spinner redraws).
+ */
+function isEmojiPresentation2600(num: number): boolean {
+    return (
+        (num >= 0x2614 && num <= 0x2615) || (num >= 0x2648 && num <= 0x2653) ||
+        num === 0x267f || num === 0x2693 || num === 0x26a1 ||
+        (num >= 0x26aa && num <= 0x26ab) || (num >= 0x26bd && num <= 0x26be) ||
+        (num >= 0x26c4 && num <= 0x26c5) || num === 0x26ce || num === 0x26d4 ||
+        num === 0x26ea || (num >= 0x26f2 && num <= 0x26f3) || num === 0x26f5 ||
+        num === 0x26fa || num === 0x26fd || num === 0x2705 ||
+        (num >= 0x270a && num <= 0x270b) || num === 0x2728 || num === 0x274c ||
+        num === 0x274e || (num >= 0x2753 && num <= 0x2755) || num === 0x2757 ||
+        (num >= 0x2795 && num <= 0x2797) || num === 0x27b0 || num === 0x27bf
+    );
+}
+
 function getCustomWcwidth(num: number): 0 | 1 | 2 {
     // Unicode 6.0 ~ 15.0 Emojis (e.g. 🟢 U+1F7E2, 🔴 U+1F534, etc.)
     if (num >= 0x1f000 && num <= 0x1ffff) {
         return 2;
     }
+    // Only the emoji-presentation subset of U+2600–U+27BF is wide; the rest
+    // (dingbats/symbols used as narrow glyphs) must stay 1 cell to match
+    // string-width and avoid full-screen TUI frame corruption.
     if (num >= 0x2600 && num <= 0x27bf) {
-        return 2;
+        return isEmojiPresentation2600(num) ? 2 : 1;
     }
     // CJK and East Asian Wide
     if (
