@@ -200,35 +200,37 @@ class GhosttyTerminalView extends ItemView {
     }
 
     async onOpen() {
-        await Promise.resolve();
-        const container = this.containerEl.children[1] as HTMLElement;
-        container.empty();
-        container.addClass('ghostty-container');
+        try {
+            await Promise.resolve();
+            const container = this.containerEl.children[1] as HTMLElement;
+            if (!container) return;
+            container.empty();
+            container.addClass('ghostty-container');
 
-        // Build a wrapper that fills the pane
-        const wrapper = container.createDiv({ cls: 'ghostty-wrapper' });
+            // Build a wrapper that fills the pane
+            const wrapper = container.createDiv({ cls: 'ghostty-wrapper' });
 
-        // Status bar for errors/restart
-        wrapper.createDiv({ cls: 'ghostty-status-bar ghostty-hidden' });
-        this.restartBtn = wrapper.createDiv({ cls: 'ghostty-restart-btn ghostty-hidden' });
-        this.restartBtn.setText('Restart shell');
-        this.restartBtn.onclick = () => this.spawnPty();
+            // Status bar for errors/restart
+            wrapper.createDiv({ cls: 'ghostty-status-bar ghostty-hidden' });
+            this.restartBtn = wrapper.createDiv({ cls: 'ghostty-restart-btn ghostty-hidden' });
+            this.restartBtn.setText('Restart shell');
+            this.restartBtn.onclick = () => this.spawnPty();
 
-        this.termEl = wrapper.createDiv({ cls: 'ghostty-term' });
+            this.termEl = wrapper.createDiv({ cls: 'ghostty-term' });
 
+            // Measure char dimensions first so we pass correct cols/rows to PTY
+            this.measureCharDimensions();
 
-        // Measure char dimensions first so we pass correct cols/rows to PTY
-        this.measureCharDimensions();
+            this.initTerminal();
 
-        this.initTerminal();
+            // Defer spawnPty so that Obsidian's setState() runs first.
+            window.setTimeout(() => { if (this.terminal) this.spawnPty(); }, 0);
 
-        // Defer spawnPty so that Obsidian's setState() runs first.
-        // setViewState() calls onOpen() then setState(), so a macrotask
-        // here ensures cwdOverride is set before the PTY starts.
-        window.setTimeout(() => { if (this.terminal) this.spawnPty(); }, 0);
-
-        this.resizeObserver = new ResizeObserver(() => this.handleResize());
-        this.resizeObserver.observe(this.termEl);
+            this.resizeObserver = new ResizeObserver(() => this.handleResize());
+            this.resizeObserver.observe(this.termEl);
+        } catch (err) {
+            console.error('[GhosttyTerminal] Error during view onOpen:', err);
+        }
     }
 
     // ── Terminal init ──────────────────────────────────────────────────────────
@@ -278,9 +280,13 @@ class GhosttyTerminalView extends ItemView {
             ...( { ligatures: s.ligatures } as object ),
         });
 
-        const unicodeGraphemesAddon = new UnicodeGraphemesAddon();
-        this.terminal.loadAddon(unicodeGraphemesAddon);
-        this.terminal.unicode.activeVersion = '15';
+        try {
+            const unicodeGraphemesAddon = new UnicodeGraphemesAddon();
+            this.terminal.loadAddon(unicodeGraphemesAddon);
+            this.terminal.unicode.activeVersion = '15';
+        } catch (e) {
+            console.warn('[GhosttyTerminal] Unicode graphemes addon failed to load:', e);
+        }
 
         this.fitAddon = new FitAddon();
         this.terminal.loadAddon(this.fitAddon);
@@ -290,7 +296,11 @@ class GhosttyTerminalView extends ItemView {
         try {
             const webglAddon = new WebglAddon();
             webglAddon.onContextLoss(() => {
-                webglAddon.dispose();
+                try {
+                    webglAddon.dispose();
+                } catch {
+                    /* ignore */
+                }
             });
             this.terminal.loadAddon(webglAddon);
         } catch (e) {
