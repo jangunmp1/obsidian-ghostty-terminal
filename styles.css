@@ -23,8 +23,7 @@
     height: 100%;
     overflow: hidden;
     position: relative;
-    padding: 0 10px;
-    /* Give text some breathing room on edges */
+    padding: 0;
     /* Isolate layout so IME composition events don't cause ancestor scroll */
     contain: layout;
 }
@@ -45,11 +44,9 @@
     pointer-events: none;
 }
 
-
-/* Make xterm internal elements fill their container */
+/* Make xterm internal container fill their parent without stretching xterm-screen canvas */
 .ghostty-term .xterm,
-.ghostty-term .xterm-viewport,
-.ghostty-term .xterm-screen {
+.ghostty-term .xterm-viewport {
     width: 100% !important;
     height: 100% !important;
 }

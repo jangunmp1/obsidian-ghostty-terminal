@@ -12,7 +12,6 @@ import {
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
-import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -280,32 +279,28 @@ class GhosttyTerminalView extends ItemView {
             ...( { ligatures: s.ligatures } as object ),
         });
 
-        try {
-            const unicodeGraphemesAddon = new UnicodeGraphemesAddon();
-            this.terminal.loadAddon(unicodeGraphemesAddon);
-            this.terminal.unicode.activeVersion = '15';
-        } catch (e) {
-            console.warn('[GhosttyTerminal] Unicode graphemes addon failed to load:', e);
-        }
-
         this.fitAddon = new FitAddon();
         this.terminal.loadAddon(this.fitAddon);
 
         this.terminal.open(this.termEl!);
 
-        try {
-            const webglAddon = new WebglAddon();
-            webglAddon.onContextLoss(() => {
-                try {
-                    webglAddon.dispose();
-                } catch {
-                    /* ignore */
-                }
-            });
-            this.terminal.loadAddon(webglAddon);
-        } catch (e) {
-            console.warn('[GhosttyTerminal] WebGL addon initialization failed, fallback to Canvas renderer:', e);
-        }
+        // Asynchronously activate WebGL renderer to avoid startup blocking
+        window.setTimeout(() => {
+            if (!this.terminal) return;
+            try {
+                const webglAddon = new WebglAddon();
+                webglAddon.onContextLoss(() => {
+                    try {
+                        webglAddon.dispose();
+                    } catch {
+                        /* ignore */
+                    }
+                });
+                this.terminal.loadAddon(webglAddon);
+            } catch (e) {
+                console.warn('[GhosttyTerminal] WebGL addon initialization failed, fallback to Canvas renderer:', e);
+            }
+        }, 50);
 
         // Sync container background with theme to avoid a dark fringe around the terminal
         const container = this.containerEl.children[1] as HTMLElement;
