@@ -10,6 +10,7 @@ import {
     ViewStateResult,
 } from 'obsidian';
 import { Terminal } from '@xterm/xterm';
+import type { IUnicodeVersionProvider } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import * as os from 'os';
@@ -24,6 +25,42 @@ import { GhosttySettingTab, GhosttyTerminalSettings, DEFAULT_SETTINGS } from './
 import ptyHelperCode from './pty_helper.py';
 
 const VIEW_TYPE_GHOSTTY = 'ghostty-terminal';
+
+// ─── Plugin ──────────────────────────────────────────────────────────────────
+
+const CHAR_MEASURE_ID = 'ghostty-char-measure';
+
+function getCustomWcwidth(num: number): 0 | 1 | 2 {
+    // Unicode 6.0 ~ 15.0 Emojis (e.g. 🟢 U+1F7E2, 🔴 U+1F534, etc.)
+    if (num >= 0x1f000 && num <= 0x1ffff) {
+        return 2;
+    }
+    if (num >= 0x2600 && num <= 0x27bf) {
+        return 2;
+    }
+    // CJK and East Asian Wide
+    if (
+        (num >= 0x1100 && num <= 0x11ff) ||
+        (num >= 0x2e80 && num <= 0x9fff) ||
+        (num >= 0xac00 && num <= 0xd7af) ||
+        (num >= 0xf900 && num <= 0xfaff) ||
+        (num >= 0xfe10 && num <= 0xfe1f) ||
+        (num >= 0xff00 && num <= 0xffef)
+    ) {
+        return 2;
+    }
+    return 1;
+}
+
+const customEmojiUnicodeProvider: IUnicodeVersionProvider = {
+    version: '12',
+    wcwidth(num: number): 0 | 1 | 2 {
+        return getCustomWcwidth(num);
+    },
+    charProperties(codepoint: number, _preceding: number): number {
+        return getCustomWcwidth(codepoint);
+    }
+};
 
 /** Returns the first path in the list that exists on the filesystem. Falls back to the last entry. */
 function resolveFirstExisting(candidates: string[]): string {
@@ -164,8 +201,6 @@ export default class GhosttyTerminalPlugin extends Plugin {
 
 // ─── View ─────────────────────────────────────────────────────────────────────
 
-const CHAR_MEASURE_ID = 'ghostty-char-measure';
-
 class GhosttyTerminalView extends ItemView {
     private terminal: Terminal | null = null;
     private fitAddon: FitAddon | null = null;
@@ -276,14 +311,15 @@ class GhosttyTerminalView extends ItemView {
             lineHeight: 1,
             letterSpacing: 0,
             customGlyphs: true,
-            ...( { unicodeVersion: '11' } as object ),
+            ...( { unicodeVersion: '12' } as object ),
             ...( { ligatures: s.ligatures } as object ),
         });
 
         try {
-            this.terminal.unicode.activeVersion = '11';
+            this.terminal.unicode.register(customEmojiUnicodeProvider);
+            this.terminal.unicode.activeVersion = '12';
         } catch (e) {
-            console.warn('[GhosttyTerminal] Failed to activate Unicode 11:', e);
+            console.warn('[GhosttyTerminal] Failed to register custom unicode provider:', e);
         }
 
         this.fitAddon = new FitAddon();
