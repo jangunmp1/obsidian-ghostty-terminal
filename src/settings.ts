@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS: GhosttyTerminalSettings = {
     defaultLocation: 'right',
     ghosttyConfigPaths: [],
     shellPaths: [],
-    fontFamilyOverride: 'JetBrains Mono, Menlo, Consolas, monospace',
+    fontFamilyOverride: 'JetBrains Mono, Menlo, Consolas, "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", monospace',
     fontSizeOverride: 0,
     ligatures: true,
     scrollbackLines: 10000,

@@ -238,7 +238,7 @@ class GhosttyTerminalView extends ItemView {
         const gc = this.plugin.ghosttyConfig;
         const s = this.plugin.settings;
 
-        const fontFamily = s.fontFamilyOverride || gc.fontFamily || 'Menlo, Monaco, "Courier New", monospace';
+        const fontFamily = s.fontFamilyOverride || gc.fontFamily || 'Menlo, Monaco, "Courier New", "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", monospace';
         const fontSize = s.fontSizeOverride > 0 ? s.fontSizeOverride : (gc.fontSize ?? 13);
         const scrollback = gc.scrollback ?? s.scrollbackLines;
 
