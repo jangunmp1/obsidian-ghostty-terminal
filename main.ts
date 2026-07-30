@@ -12,6 +12,7 @@ import {
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -276,6 +277,10 @@ class GhosttyTerminalView extends ItemView {
             customGlyphs: true,
             ...( { ligatures: s.ligatures } as object ),
         });
+
+        const unicodeGraphemesAddon = new UnicodeGraphemesAddon();
+        this.terminal.loadAddon(unicodeGraphemesAddon);
+        this.terminal.unicode.activeVersion = '15';
 
         this.fitAddon = new FitAddon();
         this.terminal.loadAddon(this.fitAddon);
