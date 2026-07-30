@@ -12,7 +12,6 @@ import {
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
-import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -285,17 +284,9 @@ class GhosttyTerminalView extends ItemView {
 
         this.terminal.open(this.termEl!);
 
-        // Asynchronously activate WebGL renderer & Unicode graphemes to avoid startup blocking
+        // Asynchronously activate WebGL renderer to avoid startup blocking
         window.setTimeout(() => {
             if (!this.terminal) return;
-
-            try {
-                const unicodeAddon = new UnicodeGraphemesAddon();
-                this.terminal.loadAddon(unicodeAddon);
-                this.terminal.unicode.activeVersion = '15';
-            } catch (e) {
-                console.warn('[GhosttyTerminal] Unicode graphemes addon load failed:', e);
-            }
 
             try {
                 const webglAddon = new WebglAddon();
