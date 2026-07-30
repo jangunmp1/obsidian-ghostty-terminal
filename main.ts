@@ -52,13 +52,34 @@ function getCustomWcwidth(num: number): 0 | 1 | 2 {
     return 1;
 }
 
+/**
+ * Packs (state, width, shouldJoin) into the integer layout xterm.js v6 expects
+ * from `charProperties`. The parser extracts width via `(value >> 1) & 0x3`, so
+ * returning the raw width (e.g. 2) would be mis-read as width 1 — the bug that
+ * made 🟢🟢 overlap. Mirrors UnicodeService.createPropertyValue.
+ */
+function packCharProperties(width: 0 | 1 | 2, shouldJoin: boolean): number {
+    return ((width & 3) << 1) | (shouldJoin ? 1 : 0);
+}
+
 const customEmojiUnicodeProvider: IUnicodeVersionProvider = {
     version: '12',
     wcwidth(num: number): 0 | 1 | 2 {
         return getCustomWcwidth(num);
     },
-    charProperties(codepoint: number, _preceding: number): number {
-        return getCustomWcwidth(codepoint);
+    charProperties(codepoint: number, preceding: number): number {
+        let width = getCustomWcwidth(codepoint);
+        // Zero-width combining marks join with the preceding cell (matches UnicodeV6).
+        let shouldJoin = width === 0 && preceding !== 0;
+        if (shouldJoin) {
+            const oldWidth = ((preceding >> 1) & 0x3) as 0 | 1 | 2;
+            if (oldWidth === 0) {
+                shouldJoin = false;
+            } else if (oldWidth > width) {
+                width = oldWidth;
+            }
+        }
+        return packCharProperties(width, shouldJoin);
     }
 };
 
@@ -311,15 +332,21 @@ class GhosttyTerminalView extends ItemView {
             lineHeight: 1,
             letterSpacing: 0,
             customGlyphs: true,
-            ...( { unicodeVersion: '12' } as object ),
+            // Required to access terminal.unicode (proposed API) below; without it
+            // the unicode.register()/activeVersion calls throw and the custom
+            // wide-emoji provider is silently never applied.
+            allowProposedApi: true,
             ...( { ligatures: s.ligatures } as object ),
         });
 
         try {
             this.terminal.unicode.register(customEmojiUnicodeProvider);
             this.terminal.unicode.activeVersion = '12';
+            if (this.terminal.unicode.activeVersion !== '12') {
+                console.error('[GhosttyTerminal] Custom unicode provider did not become active; wide emojis will render as 1 cell.');
+            }
         } catch (e) {
-            console.warn('[GhosttyTerminal] Failed to register custom unicode provider:', e);
+            console.error('[GhosttyTerminal] Failed to register custom unicode provider (wide emojis will render as 1 cell):', e);
         }
 
         this.fitAddon = new FitAddon();
