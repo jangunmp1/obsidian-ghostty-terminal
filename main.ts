@@ -168,10 +168,8 @@ export default class GhosttyTerminalPlugin extends Plugin {
 const CHAR_MEASURE_ID = 'ghostty-char-measure';
 
 function getCustomWcwidth(num: number): 0 | 1 | 2 {
-    // Unicode Emoji ranges:
-    // Miscellaneous Symbols and Pictographs, Emoticons, Transport and Map Symbols,
-    // Supplemental Symbols and Pictographs, Symbols and Pictographs Extended-A (e.g. 🟢 U+1F7E2)
-    if (num >= 0x1f300 && num <= 0x1fbff) {
+    // Unicode Emoji & Wide Symbol ranges (U+1F000 to U+1FFFF includes all emojis like 🟢 U+1F7E2)
+    if (num >= 0x1f000 && num <= 0x1ffff) {
         return 2;
     }
     if (num >= 0x2600 && num <= 0x27bf) {
@@ -482,6 +480,9 @@ class GhosttyTerminalView extends ItemView {
                     cwd,
                     env: {
                         ...process.env as Record<string, string>,
+                        LANG: process.env.LANG || 'en_US.UTF-8',
+                        LC_ALL: process.env.LC_ALL || 'en_US.UTF-8',
+                        LC_CTYPE: process.env.LC_CTYPE || 'en_US.UTF-8',
                         TERM: 'xterm-256color',
                         TERM_PROGRAM: 'obsidian-ghostty',
                         COLORTERM: 'truecolor',
